@@ -16,8 +16,8 @@ from typing import Any
 
 # Importa Request para obtener el almacén desde un endpoint
 from fastapi import Request
-# Importa el modelo validado del trabajo
-from pydantic import BaseModel
+# Importa el modelo validado del trabajo y Field para documentar cada campo en Swagger
+from pydantic import BaseModel, Field
 # Importa el cliente asíncrono de Redis y el error de transacción optimista
 from redis.asyncio import Redis
 # Importa el error que lanza Redis cuando otro cliente modificó la clave vigilada
@@ -48,31 +48,37 @@ def ahora() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-# Un trabajo tal como lo ve el cliente de la API
+# Un trabajo tal como lo ve el cliente de la API (cada campo se documenta en Swagger con su descripción)
 class Job(BaseModel):
     # Identificador (también es el thread_id de los checkpoints de LangGraph)
-    job_id: str
+    job_id: str = Field(description="Identificador de la tarea (también es el thread_id de LangGraph y el session.id de la traza en Phoenix).")
     # Estado actual
-    status: EstadoJob
+    status: EstadoJob = Field(description="Estado: PENDING, RUNNING, WAITING_APPROVAL, DONE o FAILED.")
     # Pregunta del usuario
-    pregunta: str
+    pregunta: str = Field(description="Pregunta que se le hizo al sistema.")
     # Destinatario del informe ("" = no se envía nada; si tiene valor la tarea es crítica y exige aprobación)
-    notificar_a: str = ""
+    notificar_a: str = Field(default="", description="Destinatario del informe. Si tiene valor, la tarea es crítica y exige aprobación humana antes de enviar.")
     # Respuesta final (cuando termina)
-    resultado: str | None = None
+    resultado: str | None = Field(default=None, description="Respuesta final (cuando status = DONE).")
     # PDF de las políticas que sustentan la respuesta (trazabilidad de la procedencia)
-    fuentes: list[str] = []
+    fuentes: list[str] = Field(default=[], description="PDF de las políticas que sustentan la respuesta; vacío si las políticas no cubren la pregunta.")
     # Qué pasó con el envío del informe (solo en tareas críticas)
-    despacho: str | None = None
+    despacho: str | None = Field(default=None, description="Qué pasó con el envío del informe (solo en tareas críticas).")
     # Motivo del fallo (cuando status = FAILED)
-    error: str | None = None
+    error: str | None = Field(default=None, description="Motivo del fallo (cuando status = FAILED).")
     # Lo que tiene que revisar el humano (cuando status = WAITING_APPROVAL)
-    aprobacion_pendiente: dict[str, Any] | None = None
+    aprobacion_pendiente: dict[str, Any] | None = Field(default=None, description="Lo que tiene que revisar el humano (cuando status = WAITING_APPROVAL): acción, destinatario y borrador.")
     # Decisión del revisor
-    decision: dict[str, Any] | None = None
+    decision: dict[str, Any] | None = Field(default=None, description="Decisión del revisor (aprobado y comentario).")
     # Marcas de tiempo
-    creado: str = ""
-    actualizado: str = ""
+    creado: str = Field(default="", description="Momento de creación (ISO 8601, UTC).")
+    actualizado: str = Field(default="", description="Última actualización (ISO 8601, UTC).")
+
+
+# Cuerpo de las respuestas de error de la API (404, 409, 503); se declara para que Swagger documente cada código
+class ErrorOut(BaseModel):
+    # Explicación del error
+    detail: str = Field(description="Explicación del error.")
 
 
 # Convierte un valor del trabajo en el texto que se guarda en el hash (None → "", diccionario o lista → JSON)

@@ -175,3 +175,20 @@ async def test_cinco_peticiones_concurrentes(redis: Redis) -> None:
         finales = await asyncio.gather(*(esperar(http, i, {"DONE", "FAILED"}) for i in ids))
         assert all(f["status"] == "DONE" for f in finales)
         assert grafo.maximo_en_paralelo == 5
+
+
+# Test 10: la API está documentada: Swagger describe cada endpoint, sus códigos de error y los modelos de entrada y de salida
+async def test_openapi_documenta_la_api(redis: Redis) -> None:
+    async with cliente(abridor_falso(redis, GrafoFalso(), workers=0)) as http:
+        esquema = (await http.get("/openapi.json")).json()
+    rutas = esquema["paths"]
+    assert set(rutas) == {"/tasks", "/tasks/{job_id}", "/tasks/{job_id}/approve", "/health"}
+    # Cada operación tiene resumen y descripción de sus errores
+    assert all(operacion["summary"] for ruta in rutas.values() for operacion in ruta.values())
+    assert {"404"} <= set(rutas["/tasks/{job_id}"]["get"]["responses"]) and {"404", "409"} <= set(rutas["/tasks/{job_id}/approve"]["post"]["responses"])
+    assert "503" in rutas["/health"]["get"]["responses"] and "422" in rutas["/tasks"]["post"]["responses"]
+    # Los modelos de entrada y de salida están publicados con la descripción de sus campos
+    modelos = esquema["components"]["schemas"]
+    assert {"TareaIn", "AprobacionIn", "Job", "SaludOut", "ErrorOut"} <= set(modelos)
+    assert modelos["Job"]["properties"]["fuentes"]["description"]
+    assert [etiqueta["name"] for etiqueta in esquema["tags"]] == ["tareas", "human-in-the-loop", "sistema"]

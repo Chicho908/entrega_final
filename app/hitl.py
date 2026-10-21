@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 
 # Importa los modelos y el almacén de trabajos
-from app.jobs import EstadoJob, Job, JobStore, obtener_store
+from app.jobs import ErrorOut, EstadoJob, Job, JobStore, obtener_store
 # Importa el estado compartido y la pregunta original
 from app.agents.synthesis_agent import pregunta_original
 # Importa el estado compartido del orquestador
@@ -159,7 +159,16 @@ StoreDep = Annotated[JobStore, Depends(obtener_store)]
 
 
 # Registra la decisión del revisor y encola la reanudación del grafo (la reanudación la hace un worker, no esta petición)
-@router.post("/tasks/{job_id}/approve", status_code=202)
+@router.post(
+    "/tasks/{job_id}/approve",
+    status_code=202,
+    summary="Aprobar o rechazar una tarea crítica",
+    description="Registra la decisión del revisor y reanuda el grafo pausado desde su checkpoint. Aprobada: se envía el informe. Rechazada: se cancela el envío.",
+    responses={
+        404: {"model": ErrorOut, "description": "No existe una tarea con ese id."},
+        409: {"model": ErrorOut, "description": "La tarea no está esperando aprobación (ya se decidió o nunca fue crítica)."},
+    },
+)
 async def aprobar_tarea(job_id: str, cuerpo: AprobacionIn, store: StoreDep) -> Job:
     job = await store.obtener(job_id)
     if job is None:
