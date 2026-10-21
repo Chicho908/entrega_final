@@ -66,6 +66,15 @@ async def test_reintenta_ante_salida_mal_formada() -> None:
     assert resultado.respondida and len(llm.recibidos) == 3
 
 
+# Test 2b: cada reintento deja un log con el intento y el motivo (criterio de la profesora en la Pre-entrega 2)
+async def test_cada_reintento_deja_un_log(caplog: pytest.LogCaptureFixture) -> None:
+    llm = LLMGuionado(respuestas=[error_de_validacion(), error_de_validacion(), respuesta_ok()])
+    with caplog.at_level("WARNING", logger="app.cadenas"):
+        await sintetizar(crear_cadena_sintesis(llm), {"pregunta": "x"})
+    avisos = [r.getMessage() for r in caplog.records]
+    assert len(avisos) == 2 and "intento 1 de 3" in avisos[0] and "intento 2 de 3" in avisos[1] and "ValidationError" in avisos[0]
+
+
 # Test 3: tras 3 intentos fallidos el error se propaga (el sintetizador usa entonces la respuesta de respaldo)
 async def test_falla_definitiva_tras_tres_intentos() -> None:
     llm = LLMGuionado(respuestas=[error_de_validacion()] * 3)
@@ -136,6 +145,9 @@ def test_componer_respuesta() -> None:
     # Si no pudo responder, no cita fuentes aunque las haya
     no_responde = RespuestaFinal(respuesta="Las políticas no cubren ese tema.", fuentes_citadas=[], respondida=False)
     assert componer_respuesta(no_responde, disponibles) == ("Las políticas no cubren ese tema.", [])
+    # Aunque el LLM nombre una fuente real, si no respondió no se cita: lo recuperado no sustenta ninguna respuesta
+    cita_sin_responder = RespuestaFinal(respuesta="Las políticas no cubren ese tema.", fuentes_citadas=["politica_envios.pdf"], respondida=False)
+    assert componer_respuesta(cita_sin_responder, disponibles) == ("Las políticas no cubren ese tema.", [])
     # Sin repetidos
     repetida = RespuestaFinal(respuesta="Envío gratis desde $50.000.", fuentes_citadas=["politica_envios.pdf"] * 2, respondida=True)
     assert componer_respuesta(repetida, disponibles)[1] == disponibles

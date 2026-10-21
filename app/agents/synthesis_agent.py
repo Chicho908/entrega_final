@@ -90,7 +90,8 @@ def componer_respuesta(salida: RespuestaFinal, disponibles: list[str]) -> tuple[
     # Se descartan las fuentes que el LLM citó pero no existen entre las recuperadas (no se pueden citar PDF inventados)
     citadas = [fuente for fuente in dict.fromkeys(salida.fuentes_citadas) if fuente in disponibles]
     # Si respondió pero no citó ninguna válida, se usan las recuperadas (la trazabilidad no depende de que el LLM se acuerde)
-    fuentes = citadas or (disponibles if salida.respondida else [])
+    # Si NO pudo responder, no cita ninguna fuente: lo recuperado no sustenta ninguna respuesta (aunque el LLM haya nombrado alguna)
+    fuentes = (citadas or disponibles) if salida.respondida else []
     texto = salida.respuesta.strip()
     if fuentes:
         texto += "\n\nFuentes: " + ", ".join(fuentes)

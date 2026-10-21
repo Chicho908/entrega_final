@@ -1,10 +1,15 @@
 # Módulo de cadenas: la cadena LCEL de la Pre-entrega 2, ahora al servicio del sintetizador
-# prompt | modelo con salida estructurada | reintentos  →  devuelve SIEMPRE un objeto RespuestaFinal validado por Pydantic (nunca texto suelto)
+# prompt | modelo con salida estructurada  →  devuelve SIEMPRE un objeto RespuestaFinal validado por Pydantic (nunca texto suelto)
+# Si la salida viene mal formada se reintenta con espera exponencial y CADA reintento deja un log (criterio de la profesora en la Pre-entrega 2)
 
+# Importa asyncio para esperar entre reintentos sin bloquear el event loop
+import asyncio
 # Importa json para pasarle los datos al LLM en formato compacto
 import json
 # Importa logging para dejar registro del procesamiento y de los fallos tras los reintentos
 import logging
+# Importa random para agregar jitter (variación aleatoria) a la espera entre reintentos
+import random
 # Importa Any para tipar los datos
 from typing import Any
 
@@ -21,6 +26,10 @@ from pydantic import BaseModel, Field, ValidationError
 
 # Crea el logger del módulo
 logger = logging.getLogger(__name__)
+
+# Intentos totales de la síntesis ante una salida mal formada y espera base entre intentos (segundos)
+INTENTOS_SINTESIS = 3
+ESPERA_BASE_S = 1.0
 
 # Instrucciones fijas del rol de síntesis (sin llaves: el prompt template las interpretaría como variables)
 PROMPT_SINTETIZADOR = (
@@ -53,27 +62,35 @@ PROMPT = ChatPromptTemplate.from_messages(
 )
 
 
-# Arma la cadena: prompt | modelo con salida estructurada | reintentos
+# Arma la cadena: prompt | modelo con salida estructurada
 def crear_cadena_sintesis(llm: BaseChatModel) -> Runnable[dict[str, str], Any]:
     # with_structured_output fuerza al modelo a devolver una instancia de RespuestaFinal validada por Pydantic
-    modelo_estructurado = llm.with_structured_output(RespuestaFinal)
-    # with_retry reintenta SOLO si la salida vino mal formada o incompleta (no reintenta una API key inválida ni una caída de red, que ya reintenta el cliente)
-    return (PROMPT | modelo_estructurado).with_retry(
-        retry_if_exception_type=(ValidationError, OutputParserException),
-        stop_after_attempt=3,
-        wait_exponential_jitter=True,
-    )
+    return PROMPT | llm.with_structured_output(RespuestaFinal)
 
 
-# Ejecuta la cadena de forma asíncrona y deja logs del proceso, incluido el fallo definitivo tras los reintentos
+# Ejecuta la cadena de forma asíncrona. Reintenta SOLO si la salida vino mal formada o incompleta (ValidationError / OutputParserException):
+# una API key inválida no se arregla reintentando y las caídas de red ya las reintenta el cliente del proveedor. Cada reintento queda en el log
 async def sintetizar(cadena: Runnable[dict[str, str], Any], datos: dict[str, Any]) -> RespuestaFinal:
     logger.info("Sintetizando con %s fragmento(s) y %s cálculo(s)", len(datos.get("fragmentos", [])), len(datos.get("calculos", [])))
-    try:
-        salida = await cadena.ainvoke({"datos": json.dumps(datos, ensure_ascii=False)})
-        resultado = salida if isinstance(salida, RespuestaFinal) else RespuestaFinal.model_validate(salida)
-        logger.info("Síntesis validada: respondida=%s, fuentes=%s", resultado.respondida, resultado.fuentes_citadas)
-        return resultado
-    except Exception as error:
-        # Si with_retry ya agotó los 3 intentos, esto es el fallo definitivo (el sintetizador usa entonces su respuesta de respaldo)
-        logger.error("Falló la síntesis tras los reintentos: %s", error)
-        raise
+    entrada = {"datos": json.dumps(datos, ensure_ascii=False)}
+    for intento in range(1, INTENTOS_SINTESIS + 1):
+        try:
+            salida = await cadena.ainvoke(entrada)
+            resultado = salida if isinstance(salida, RespuestaFinal) else RespuestaFinal.model_validate(salida)
+        except (ValidationError, OutputParserException) as error:
+            # Último intento: es el fallo definitivo (el sintetizador usa entonces su respuesta de respaldo)
+            if intento == INTENTOS_SINTESIS:
+                logger.error("Falló la síntesis tras %s intentos: %s", INTENTOS_SINTESIS, error)
+                raise
+            espera = ESPERA_BASE_S * 2 ** (intento - 1) * random.uniform(0.5, 1.5)
+            logger.warning("La salida del LLM no cumplió el contrato (intento %s de %s): %s. Reintenta en %.1f s", intento, INTENTOS_SINTESIS, type(error).__name__, espera)
+            await asyncio.sleep(espera)
+        except Exception as error:
+            # Cualquier otro error (credenciales, red agotada) no se reintenta acá
+            logger.error("Falló la síntesis sin posibilidad de reintento: %s", error)
+            raise
+        else:
+            logger.info("Síntesis validada: respondida=%s, fuentes=%s", resultado.respondida, resultado.fuentes_citadas)
+            return resultado
+    # Inalcanzable (el bucle siempre devuelve o lanza), pero el tipado lo exige
+    raise RuntimeError("sintetizar terminó sin resultado")
