@@ -1,0 +1,4 @@
+# Herramientas de calidad de codigo: suman ruff (lint) y mypy (tipado estatico) a las dependencias de ejecucion y de tests de requirements.txt
+-r requirements.txt
+ruff==0.17.1
+mypy==2.4.0

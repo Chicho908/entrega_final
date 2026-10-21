@@ -1,0 +1,3 @@
+# Finales de linea: los scripts de shell siempre con LF (si no, ./run.sh falla en Git Bash con "\r: command not found")
+* text=auto
+*.sh text eol=lf

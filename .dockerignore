@@ -1,0 +1,12 @@
+# Lo que no va dentro de la imagen (las credenciales llegan por env_file, nunca se copian)
+.env
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+tests
+screenshots

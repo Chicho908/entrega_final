@@ -1,0 +1,39 @@
+# Dependencias de ejecucion (versiones probadas con Python 3.12)
+
+# Orquestador multi-agente (Pre-entrega 6)
+langgraph==1.2.14
+langchain-core==1.6.7
+langchain-openai==1.6.7
+langchain-anthropic==1.7.5
+anthropic==1.15.0
+openai==3.35.0
+pydantic==2.13.5
+python-dotenv==1.2.4
+orjson==3.11.5
+
+# API asincrona
+fastapi==0.143.0
+uvicorn==0.54.0
+
+# Redis: estado de los trabajos, cola y checkpoints de LangGraph (el checkpointer requiere Redis Stack, ver docker-compose.yml)
+redis==8.1.0
+langgraph-checkpoint-redis==0.5.2
+
+# RAG hibrido (Pre-entrega 4): Pinecone con su SDK asincrono oficial (el extra [asyncio] instala aiohttp) + BM25 + PDF + stemmer en espanol
+pinecone[asyncio]==7.3.0
+aiohttp==3.14.5
+rank-bm25==0.2.2
+pypdf==6.21.1
+snowballstemmer==3.1.1
+
+# Observabilidad: trazas a Arize Phoenix por OpenTelemetry (OpenInference)
+arize-phoenix-otel==0.17.2
+openinference-instrumentation-langchain==0.1.79
+
+# Cliente de las pruebas del sistema (scripts/pruebas_sistema.py)
+httpx==0.28.1
+
+# Tests: quedan en requirements.txt (no solo en requirements-dev.txt) para que `pip install -r requirements.txt && python -m pytest` funcione en un clon limpio
+pytest==9.1.1
+pytest-asyncio==1.4.0
+fakeredis==2.39.0
