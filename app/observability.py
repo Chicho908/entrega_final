@@ -18,6 +18,8 @@ from openinference.instrumentation import OITracer, TraceConfig, using_attribute
 from openinference.instrumentation._spans import OpenInferenceSpan
 # Importa la API de OpenTelemetry para pedir el tracer global
 from opentelemetry import trace as trace_api
+# Importa el estado del span (OK / ERROR)
+from opentelemetry.trace import Status, StatusCode
 
 # Importa la configuración
 from app.config import Settings
@@ -85,3 +87,5 @@ def span_de_job(job_id: str, nombre: str, entrada: str, etiquetas: list[str] | N
         with obtener_tracer().start_as_current_span(nombre, openinference_span_kind="chain") as span:
             span.set_input(entrada)
             yield span
+            # Si el bloque terminó sin excepción, el span se marca OK (en Phoenix se ve "OK" en vez de "Unset")
+            span.set_status(Status(StatusCode.OK))

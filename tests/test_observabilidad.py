@@ -93,6 +93,8 @@ async def test_span_de_job_agrupa_la_traza_por_sesion() -> None:
     spans = EXPORTADOR.get_finished_spans()
     raiz = next(s for s in spans if s.name == "job.ejecutar")
     assert (raiz.attributes or {})["session.id"] == "job-123" and raiz.parent is None
+    # Un trabajo que termina bien deja el span raíz en OK (no "Unset")
+    assert raiz.status.status_code == StatusCode.OK
     # Todos los spans del grafo pertenecen a la misma traza y heredan la sesión
     resto = [s for s in spans if s is not raiz]
     assert resto and all(s.context is not None and raiz.context is not None and s.context.trace_id == raiz.context.trace_id for s in resto)
