@@ -46,7 +46,7 @@ async def cliente(servidor: PineconeFalso) -> AsyncIterator[PineconeAsyncio]:
 def ajustes(servidor: PineconeFalso) -> Settings:
     return settings_de_prueba(
         pinecone_api_key="clave-de-prueba", pinecone_index="indice-de-prueba", pinecone_namespace="ns-de-prueba",
-        embedding_model="modelo-de-prueba", embedding_dim=servidor.dimension, datos_dir="data",
+        pinecone_cloud="aws", pinecone_region="us-east-1", embedding_model="modelo-de-prueba", embedding_dim=servidor.dimension, datos_dir="data",
     )
 
 

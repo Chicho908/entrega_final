@@ -49,12 +49,12 @@ class Settings:
     pinecone_index: str = ""
     # Namespace dentro del índice (separa este corpus de cualquier otro)
     pinecone_namespace: str = ""
-    # Nube y región del índice serverless (solo se usan si el índice hay que crearlo)
-    pinecone_cloud: str = "aws"
-    pinecone_region: str = "us-east-1"
+    # Nube y región del índice serverless (solo se usan si el índice hay que crearlo; siempre salen de PINECONE_CLOUD / PINECONE_REGION, sin valores escritos en el código)
+    pinecone_cloud: str = ""
+    pinecone_region: str = ""
     # Modelo de embeddings de Pinecone Inference y su dimensión (el índice se crea con esta dimensión)
     embedding_model: str = ""
-    embedding_dim: int = 1024
+    embedding_dim: int = 0
     # Carpeta con los PDF de las políticas
     datos_dir: str = "data"
     # Cantidad de fragmentos que devuelve el recuperador híbrido
@@ -95,6 +95,12 @@ def _leer_entero(nombre: str, por_defecto: int, minimo: int) -> int:
         raise ConfigError(f"{nombre} debe ser como mínimo {minimo}, pero vale {valor}.")
     # Devuelve el valor ya validado
     return valor
+
+
+# Lee una variable de entorno entera obligatoria (la dimensión de los embeddings depende del modelo, así que no tiene un valor por defecto razonable)
+def _leer_entero_obligatorio(nombre: str, minimo: int) -> int:
+    _leer_obligatoria(nombre)
+    return _leer_entero(nombre, por_defecto=minimo, minimo=minimo)
 
 
 # Lee una variable de entorno obligatoria: si falta o quedó el valor de ejemplo del .env.example, corta con un mensaje claro
@@ -152,10 +158,10 @@ def cargar_configuracion() -> Settings:
         pinecone_api_key=_leer_obligatoria("PINECONE_API_KEY"),
         pinecone_index=_leer_obligatoria("PINECONE_INDEX_NAME"),
         pinecone_namespace=_leer_obligatoria("PINECONE_NAMESPACE"),
-        pinecone_cloud=os.getenv("PINECONE_CLOUD", "").strip() or "aws",
-        pinecone_region=os.getenv("PINECONE_REGION", "").strip() or "us-east-1",
+        pinecone_cloud=_leer_obligatoria("PINECONE_CLOUD"),
+        pinecone_region=_leer_obligatoria("PINECONE_REGION"),
         embedding_model=_leer_obligatoria("EMBEDDING_MODEL"),
-        embedding_dim=_leer_entero("EMBEDDING_DIM", por_defecto=1024, minimo=1),
+        embedding_dim=_leer_entero_obligatorio("EMBEDDING_DIM", minimo=1),
         datos_dir=os.getenv("DATA_DIR", "").strip() or "data",
         top_k=_leer_entero("TOP_K", por_defecto=4, minimo=1),
         rrf_k=_leer_entero("RRF_K", por_defecto=60, minimo=1),

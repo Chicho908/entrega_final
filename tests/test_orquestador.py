@@ -309,7 +309,8 @@ def test_tabla_de_guardarrailes(propuesta: str, estado: dict[str, Any], esperado
 # Variables obligatorias de una configuración válida
 VARIABLES_OBLIGATORIAS = {
     "LLM_MODEL": "modelo-de-prueba", "PINECONE_API_KEY": "pc-prueba", "PINECONE_INDEX_NAME": "indice-de-prueba",
-    "PINECONE_NAMESPACE": "ns-de-prueba", "EMBEDDING_MODEL": "embeddings-de-prueba",
+    "PINECONE_NAMESPACE": "ns-de-prueba", "PINECONE_CLOUD": "nube-de-prueba", "PINECONE_REGION": "region-de-prueba",
+    "EMBEDDING_MODEL": "embeddings-de-prueba", "EMBEDDING_DIM": "1024",
 }
 
 
@@ -318,7 +319,7 @@ def test_configuracion(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config, "load_dotenv", lambda *a, **k: None)
     for variable in (
         "LLM_PROVIDER", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "MAX_REFINAMIENTOS", "MAX_PASOS_SUPERVISOR", "RECURSION_LIMIT",
-        "EMBEDDING_DIM", "CHUNK_SIZE", "CHUNK_OVERLAP", *VARIABLES_OBLIGATORIAS,
+        "CHUNK_SIZE", "CHUNK_OVERLAP", *VARIABLES_OBLIGATORIAS,
     ):
         monkeypatch.delenv(variable, raising=False)
     # Sin API key del LLM corta con un mensaje claro (el proveedor por defecto es anthropic)
@@ -328,7 +329,7 @@ def test_configuracion(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "tu_api_key_aqui")
     with pytest.raises(config.ConfigError):
         config.cargar_configuracion()
-    # Con la key real, cada variable obligatoria que falta se reclama por su nombre (modelo, Pinecone, índice, namespace, embeddings)
+    # Con la key real, cada variable obligatoria que falta se reclama por su nombre (modelo, Pinecone, índice, namespace, nube, región, embeddings y su dimensión)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-prueba")
     for variable, valor in VARIABLES_OBLIGATORIAS.items():
         with pytest.raises(config.ConfigError, match=variable):

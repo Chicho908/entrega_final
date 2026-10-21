@@ -34,6 +34,8 @@ from app.llm import traducir_error
 from app.jobs import EstadoJob, Job
 # Importa la observabilidad
 from app.observability import cerrar_observabilidad, configurar_logging, iniciar_observabilidad, span_de_job
+# Importa el error de índice de Pinecone (índice inexistente o con otra dimensión)
+from app.rag.almacen import ErrorIndice
 # Importa el runtime
 from app.runtime import Runtime, abrir_runtime
 # Importa el estado inicial y el formateo de la traza
@@ -193,7 +195,12 @@ def main() -> int:
     except ConfigError as error:
         logger.error("Error de configuración: %s", error)
         return 1
-    asyncio.run(ejecutar_proceso_worker(settings))
+    try:
+        asyncio.run(ejecutar_proceso_worker(settings))
+    # Un índice inexistente o con otra dimensión es un error de configuración: se explica en una línea en vez de un traceback
+    except ErrorIndice as error:
+        logger.error("Error de configuración de Pinecone: %s", error)
+        return 1
     return 0
 
 

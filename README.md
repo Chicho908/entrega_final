@@ -134,6 +134,51 @@ PDF ──▶ corpus.py: secciones numeradas ──▶ chunks con metadata (fuen
                                                                 (filtro por categoria en las dos ramas)
 ```
 
+## Que hace
+
+1. **`app/main.py`** — la API FastAPI: `POST /tasks`, `GET /tasks/{id}` y
+   `GET /health`, e incluye el router de aprobacion. Toda entrada y salida tiene
+   un modelo Pydantic y Swagger (`/docs`) documenta cada endpoint, sus codigos de
+   error y cada campo. `crear_app()` recibe la funcion que abre los recursos, asi
+   los tests la reemplazan por Redis falso y LLM falsos.
+2. **`app/jobs.py`** — el estado de los trabajos y la cola sobre Redis
+   (`JobStore`). El estado es un hash `job:<id>`; la cola es la lista
+   `tasks:queue`. Los cambios de estado son atomicos (`WATCH`/`MULTI`).
+3. **`app/worker.py`** — saca trabajos de la cola, ejecuta el grafo y deja el
+   resultado o el error en Redis. Corre como proceso aparte o embebido en la
+   API (`WORKERS_EMBEBIDOS`).
+4. **`app/graph.py`** — el `StateGraph` del orquestador (supervisor,
+   especialistas, validacion, sintesis y tramo de aprobacion humana), compilado
+   con el checkpointer de Redis.
+5. **`app/supervisor.py`** — el LLM propone el siguiente paso con salida
+   estructurada (`Decision`) y los guardarrailes de codigo lo corrigen si rompe
+   una regla.
+6. **`app/agents/`** — el investigador (RAG), el analista (calculos), el
+   sintetizador (redaccion) y el subgrafo ReAct que comparten los dos primeros.
+7. **`app/validation.py`** — el arbitro determinista: contrato, procedencia,
+   recalculo, respaldo y coherencia.
+8. **`app/calculos.py`** — las reglas de negocio como funciones puras con
+   contratos Pydantic de entrada y salida; las usan el analista y el arbitro.
+9. **`app/rag/`** — el RAG: `corpus.py` (PDF → fragmentos con metadata),
+   `embeddings.py` y `almacen.py` (Pinecone con el SDK asincrono),
+   `recuperador.py` (BM25 + vectores + RRF), `ingesta.py` y `reintentos.py`.
+10. **`app/cadenas.py`** — la cadena LCEL del sintetizador (`prompt | modelo con
+    salida estructurada`) con reintentos que dejan log.
+11. **`app/hitl.py`** — la regla de criticidad, el nodo `aprobacion` (con
+    `interrupt()`), el nodo `despacho` y el endpoint `POST /tasks/{id}/approve`.
+12. **`app/observability.py`** — inicializa Phoenix (`phoenix.otel.register` con
+    instrumentacion de LangChain/LangGraph) y abre un span raiz por trabajo con
+    el `job_id` como `session.id`.
+13. **`app/runtime.py`** — abre Redis, Pinecone, el checkpointer y el grafo; lo
+    comparten la API y el worker.
+14. **`app/config.py` / `app/llm.py`** — configuracion validada al arrancar
+    (`Settings`) y fabrica del LLM (Anthropic u OpenAI) con los errores del
+    proveedor traducidos a mensajes claros.
+15. **`scripts/`** — `pruebas_sistema.py` (las 5 pruebas contra la API real) y
+    `generar_diagrama.py`.
+16. **`tests/`** — la suite con LLM, Redis y Pinecone falsos (ver
+    [Tests y tipado](#tests-y-tipado)).
+
 ## Cumplimiento de la consigna
 
 | Requisito de la consigna | Donde esta |
@@ -154,6 +199,8 @@ PDF ──▶ corpus.py: secciones numeradas ──▶ chunks con metadata (fuen
 Requiere **Docker** y dos cuentas: un LLM (**Anthropic** u **OpenAI**) y
 **Pinecone** (el plan gratuito alcanza).
 
+Requiere tambien **Python 3.12 o superior** si se corre fuera de Docker (declarado en `.python-version` y en el `Dockerfile`).
+
 **1. Configurar las claves** (una sola vez; el archivo `.env` no se sube al repo):
 
 ```bash
@@ -161,8 +208,8 @@ cp .env.example .env           # en PowerShell: copy .env.example .env
 ```
 
 Editar `.env` y completar `LLM_PROVIDER`, la key del proveedor, `LLM_MODEL` y
-`PINECONE_API_KEY`. Los demas valores (indice, namespace, modelo de embeddings)
-traen un ejemplo que funciona.
+`PINECONE_API_KEY`. Los demas valores (indice, namespace, nube y region,
+modelo de embeddings y su dimension) traen un ejemplo que funciona.
 
 **2. Levantar todo:**
 
@@ -327,8 +374,8 @@ python -m ruff check app tests scripts --select F,E9,B
 python -m mypy --strict app tests scripts
 ```
 
-Resultado esperado: `175 passed`, `All checks passed!` y `Success: no issues
-found in 48 source files`. Son 135 funciones `test_*`; algunas estan
+Resultado esperado: `177 passed`, `All checks passed!` y `Success: no issues
+found in 48 source files`. Son 137 funciones `test_*`; algunas estan
 parametrizadas y generan mas casos. No necesitan API key, Docker ni Redis (LLM
 falsos y `fakeredis`), asi que corren igual en un `git clone` en limpio con
 Python 3.12 o superior.
@@ -350,9 +397,9 @@ del indice, el chequeo de dimension, los reintentos ante `503` (y que un `401`
 | `test_corpus.py`, `test_recuperador.py` | Troceado determinista con metadata, BM25 + RRF, filtro por categoria, degradacion a BM25, golden set (hit@3) |
 | `test_pinecone.py` | La integracion con el SDK real contra un servidor HTTP falso |
 | `test_dominio.py` | El arbitro (procedencia, alteracion, recalculo, coherencia), herramientas con Pydantic, guardarrailes del supervisor, traduccion de errores |
-| `test_cadenas.py` | La cadena LCEL: salida estructurada, reintentos, credenciales, respuesta de respaldo |
+| `test_cadenas.py` | La cadena LCEL: salida estructurada, reintentos con log, credenciales, respuesta de respaldo |
 | `test_orquestador.py` | El grafo completo: camino feliz, consulta sin analista, refinamientos, degradaciones, topes, configuracion y diagrama |
-| `test_api.py`, `test_worker.py`, `test_jobs.py`, `test_hitl.py` | Contratos HTTP, que `POST` no bloquea, estados, `FAILED`, concurrencia, aprobacion humana |
+| `test_api.py`, `test_worker.py`, `test_jobs.py`, `test_hitl.py` | Contratos HTTP y documentacion OpenAPI, que `POST` no bloquea, estados, `FAILED`, concurrencia, aprobacion humana |
 | `test_observabilidad.py` | Spans de las herramientas (falla de infraestructura = ERROR, sin resultados = OK) y span raiz con `session.id = job_id` |
 | `test_pruebas_sistema.py` | El script de las 5 pruebas corre de punta a punta contra la API en memoria |
 
@@ -381,7 +428,7 @@ del indice, el chequeo de dimension, los reintentos ante `503` (y que un `401`
 ├── scripts/
 │   ├── pruebas_sistema.py    # las 5 pruebas del sistema contra la API real
 │   └── generar_diagrama.py   # regenera el diagrama Mermaid
-├── tests/                    # 175 casos con LLM falsos, Redis falso y un servidor HTTP falso de Pinecone
+├── tests/                    # 177 casos con LLM falsos, Redis falso y un servidor HTTP falso de Pinecone
 ├── screenshots/              # capturas de Phoenix de las 5 pruebas
 ├── Dockerfile                # imagen de la API, el worker y la ingesta
 ├── docker-compose.yml        # redis-stack + phoenix + ingesta + api + worker
