@@ -1,0 +1,22 @@
+[
+  {
+    "pregunta": "¿Cuál es el costo de envío para pedidos menores a $50.000?",
+    "documento_id_esperado": "politica_envios.pdf"
+  },
+  {
+    "pregunta": "¿Cuántos días corridos tiene un cliente para devolver un producto?",
+    "documento_id_esperado": "politica_devoluciones.pdf"
+  },
+  {
+    "pregunta": "¿Qué descuento corresponde a partir de 50 unidades compradas?",
+    "documento_id_esperado": "politica_descuentos.pdf"
+  },
+  {
+    "pregunta": "¿Cuántos días de vacaciones corresponden a un empleado con 7 años de antigüedad?",
+    "documento_id_esperado": "politica_vacaciones.pdf"
+  },
+  {
+    "pregunta": "¿Con cuántos días de anticipación hay que solicitar las vacaciones?",
+    "documento_id_esperado": "politica_vacaciones.pdf"
+  }
+]
