@@ -19,7 +19,7 @@ from app.agents.synthesis_agent import (
     respuesta_de_respaldo,
 )
 # Importa la cadena de síntesis y su contrato de salida
-from app.cadenas import RespuestaFinal, crear_cadena_sintesis, sintetizar
+from app.cadenas import MontoNoRespaldado, RespuestaFinal, crear_cadena_sintesis, sintetizar
 # Importa el corpus real (para armar fragmentos auténticos)
 from app.rag.corpus import cargar_chunks
 # Importa el estado inicial del orquestador
@@ -38,6 +38,15 @@ class ErrorDeClave(Exception):
     status_code = 401
 
 
+# Datos validados de ejemplo: un fragmento de política que menciona el umbral de $50.000 (respuesta_ok lo cita)
+DATOS_ENVIO: dict[str, Any] = {"pregunta": "¿envío?", "fragmentos": [{"fuente": "politica_envios.pdf", "texto": "El envío es gratis en compras desde $50.000."}], "calculos": []}
+
+
+# Respuesta con un importe que NO está en los datos (un LLM que calcula por su cuenta)
+def respuesta_inventada() -> RespuestaFinal:
+    return RespuestaFinal(respuesta="El envío cuesta $3.700 y es gratis desde $50.000.", fuentes_citadas=["politica_envios.pdf"], respondida=True)
+
+
 # Las esperas entre reintentos no corren en los tests (si no, cada reintento tardaría 1 o 2 segundos)
 @pytest.fixture(autouse=True)
 def sin_esperas(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -53,7 +62,7 @@ def sin_esperas(monkeypatch: pytest.MonkeyPatch) -> None:
 # Test 1: la cadena devuelve un RespuestaFinal validado y el prompt lleva los datos y el rol de sistema
 async def test_la_cadena_devuelve_respuesta_validada() -> None:
     llm = LLMGuionado(respuestas=[respuesta_ok()])
-    resultado = await sintetizar(crear_cadena_sintesis(llm), {"pregunta": "¿envío?", "fragmentos": [], "calculos": []})
+    resultado = await sintetizar(crear_cadena_sintesis(llm), DATOS_ENVIO)
     assert isinstance(resultado, RespuestaFinal) and resultado.respondida
     mensajes = llm.recibidos[0]
     assert "Sintetizador" in str(mensajes[0].content) and "¿envío?" in str(mensajes[1].content)
@@ -62,7 +71,7 @@ async def test_la_cadena_devuelve_respuesta_validada() -> None:
 # Test 2: si la salida viene mal formada (ValidationError), la cadena reintenta y se recupera
 async def test_reintenta_ante_salida_mal_formada() -> None:
     llm = LLMGuionado(respuestas=[error_de_validacion(), error_de_validacion(), respuesta_ok()])
-    resultado = await sintetizar(crear_cadena_sintesis(llm), {"pregunta": "x"})
+    resultado = await sintetizar(crear_cadena_sintesis(llm), DATOS_ENVIO)
     assert resultado.respondida and len(llm.recibidos) == 3
 
 
@@ -70,9 +79,26 @@ async def test_reintenta_ante_salida_mal_formada() -> None:
 async def test_cada_reintento_deja_un_log(caplog: pytest.LogCaptureFixture) -> None:
     llm = LLMGuionado(respuestas=[error_de_validacion(), error_de_validacion(), respuesta_ok()])
     with caplog.at_level("WARNING", logger="app.cadenas"):
-        await sintetizar(crear_cadena_sintesis(llm), {"pregunta": "x"})
+        await sintetizar(crear_cadena_sintesis(llm), DATOS_ENVIO)
     avisos = [r.getMessage() for r in caplog.records]
     assert len(avisos) == 2 and "intento 1 de 3" in avisos[0] and "intento 2 de 3" in avisos[1] and "ValidationError" in avisos[0]
+
+
+# Test 2c: si la respuesta trae un importe que no está en los datos se rechaza, se reintenta avisándole cuál sobra y se acepta la versión corregida
+async def test_rechaza_importes_inventados_y_reintenta() -> None:
+    llm = LLMGuionado(respuestas=[respuesta_inventada(), respuesta_ok()])
+    resultado = await sintetizar(crear_cadena_sintesis(llm), DATOS_ENVIO)
+    assert "$3.700" not in resultado.respuesta and len(llm.recibidos) == 2
+    # El reintento le dice al LLM qué importe sobraba
+    assert "3700" in str(llm.recibidos[1][1].content)
+
+
+# Test 2d: si el LLM insiste en inventar importes, la síntesis falla (el nodo usa entonces la respuesta de respaldo con los cálculos reales)
+async def test_importes_inventados_en_todos_los_intentos() -> None:
+    llm = LLMGuionado(respuestas=[respuesta_inventada()] * 3)
+    with pytest.raises(MontoNoRespaldado):
+        await sintetizar(crear_cadena_sintesis(llm), DATOS_ENVIO)
+    assert len(llm.recibidos) == 3
 
 
 # Test 3: tras 3 intentos fallidos el error se propaga (el sintetizador usa entonces la respuesta de respaldo)

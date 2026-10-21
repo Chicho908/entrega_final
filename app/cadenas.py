@@ -24,6 +24,9 @@ from langchain_core.runnables import Runnable
 # Importa BaseModel, Field y ValidationError para el contrato de salida
 from pydantic import BaseModel, Field, ValidationError
 
+# Importa la verificación de importes de la respuesta contra los datos validados
+from app.montos import montos_no_respaldados
+
 # Crea el logger del módulo
 logger = logging.getLogger(__name__)
 
@@ -36,6 +39,7 @@ PROMPT_SINTETIZADOR = (
     "Sos el Sintetizador de un equipo que responde preguntas sobre las políticas internas de EmpresaFlomat. "
     "Redactá la respuesta final para el usuario usando EXCLUSIVAMENTE los datos validados que te pasan: fragmentos de política (con su fuente y página) y cálculos ya hechos. "
     "Los números de los cálculos son exactos: citalos tal cual, sin recalcular ni redondear. Los importes van con signo $ y puntos de miles. "
+    "NO calcules importes que no estén en los datos (por ejemplo, cuánto vale cada descuento por separado): usá solo los importes que te pasan y expresá los descuentos como porcentajes. "
     "Citá la fuente de cada dato con el nombre del PDF, por ejemplo politica_envios.pdf. "
     "Si los fragmentos no contienen la respuesta, o falta un dato para calcular, decilo con claridad, marcá respondida en falso y no inventes políticas ni cifras. "
     "Si hay LIMITACIONES, explicalas y no completes lo que falta. "
@@ -53,6 +57,11 @@ class RespuestaFinal(BaseModel):
     respondida: bool = Field(description="True si los datos alcanzaron para responder la pregunta; False si falta información o un dato.")
 
 
+# Error de la síntesis: la respuesta incluye importes en pesos que no figuran en los datos validados (el LLM los inventó o los calculó por su cuenta)
+class MontoNoRespaldado(ValueError):
+    pass
+
+
 # Prompt modular: el rol queda separado del mensaje humano con los datos
 PROMPT = ChatPromptTemplate.from_messages(
     [
@@ -68,7 +77,7 @@ def crear_cadena_sintesis(llm: BaseChatModel) -> Runnable[dict[str, str], Any]:
     return PROMPT | llm.with_structured_output(RespuestaFinal)
 
 
-# Ejecuta la cadena de forma asíncrona. Reintenta SOLO si la salida vino mal formada o incompleta (ValidationError / OutputParserException):
+# Ejecuta la cadena de forma asíncrona. Reintenta SOLO si la salida vino mal formada o incompleta (ValidationError / OutputParserException) o trae importes inventados (MontoNoRespaldado):
 # una API key inválida no se arregla reintentando y las caídas de red ya las reintenta el cliente del proveedor. Cada reintento queda en el log
 async def sintetizar(cadena: Runnable[dict[str, str], Any], datos: dict[str, Any]) -> RespuestaFinal:
     logger.info("Sintetizando con %s fragmento(s) y %s cálculo(s)", len(datos.get("fragmentos", [])), len(datos.get("calculos", [])))
@@ -77,7 +86,14 @@ async def sintetizar(cadena: Runnable[dict[str, str], Any], datos: dict[str, Any
         try:
             salida = await cadena.ainvoke(entrada)
             resultado = salida if isinstance(salida, RespuestaFinal) else RespuestaFinal.model_validate(salida)
-        except (ValidationError, OutputParserException) as error:
+            # Guardarraíl: todo importe en pesos de la respuesta tiene que salir de los datos validados
+            inventados = montos_no_respaldados(resultado.respuesta, datos)
+            if inventados:
+                # En el reintento se le dice al LLM exactamente qué importes sobran, así no repite el error
+                correccion = f"Tu respuesta anterior incluyó importes que no figuran en los datos: {inventados}. No calcules importes: usá solo los de los datos."
+                entrada = {"datos": json.dumps({**datos, "correccion": correccion}, ensure_ascii=False)}
+                raise MontoNoRespaldado(f"importes sin respaldo: {inventados}")
+        except (ValidationError, OutputParserException, MontoNoRespaldado) as error:
             # Último intento: es el fallo definitivo (el sintetizador usa entonces su respuesta de respaldo)
             if intento == INTENTOS_SINTESIS:
                 logger.error("Falló la síntesis tras %s intentos: %s", INTENTOS_SINTESIS, error)
