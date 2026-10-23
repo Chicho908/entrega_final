@@ -1,6 +1,6 @@
 # Entrega final: Intelligence System (EmpresaFlomat)
 
-**Python 3.12+** · FastAPI · LangGraph · Pinecone · Redis · Arize Phoenix
+**Python 3.12+** (declarado en `pyproject.toml`, `.python-version` y el `Dockerfile`) · FastAPI · LangGraph · Pinecone · Redis · Arize Phoenix
 
 Sistema de IA de punta a punta (Modulo 8, CoderHouse - Desarrollo de
 aplicaciones con LLMs) que responde preguntas complejas sobre las politicas
@@ -192,14 +192,14 @@ PDF ──▶ corpus.py: secciones numeradas ──▶ chunks con metadata (fuen
 | **Despliegue local con una instruccion** | `docker compose up --build` o `./run.sh` |
 | Sin hard-coding | Modelo del LLM, modelo de embeddings, indice y namespace de Pinecone, claves y todos los topes salen de variables de entorno (`.env.example`); el codigo no tiene valores por defecto para ellos |
 | Sin secretos | `.env` esta en `.gitignore`; solo se versiona `.env.example` |
-| Python 3.12+ | `FROM python:3.12-slim` en el `Dockerfile`; los tests y el tipado corren en 3.12 |
+| Python 3.12+ | `requires-python = ">=3.12"` en `pyproject.toml`, `.python-version` y `FROM python:3.12-slim` en el `Dockerfile`; las dependencias estan fijadas en `requirements.txt` y los tests y el tipado corren en 3.12 |
 
 ## Como correrlo (una sola instruccion)
 
 Requiere **Docker** y dos cuentas: un LLM (**Anthropic** u **OpenAI**) y
 **Pinecone** (el plan gratuito alcanza).
 
-Requiere tambien **Python 3.12 o superior** si se corre fuera de Docker (declarado en `.python-version` y en el `Dockerfile`).
+Requiere tambien **Python 3.12 o superior** si se corre fuera de Docker (declarado en `pyproject.toml`, `.python-version` y el `Dockerfile`).
 
 **1. Configurar las claves** (una sola vez; el archivo `.env` no se sube al repo):
 
@@ -299,7 +299,7 @@ curl http://localhost:8000/tasks/<job_id>
 
 El "email" lo simula el despachador dejando el mensaje en la lista `outbox` de
 Redis: `docker compose exec redis redis-cli LRANGE outbox 0 -1`. Mientras la
-tarea esta en `WAITING_APPROVAL` esa lista sigue vacia.
+tarea esta en `WAITING_APPROVAL` esa lista no crece (solo suma un mensaje al aprobar).
 
 ## Las 5 pruebas del sistema y sus trazas
 
@@ -334,7 +334,89 @@ es el `session.id` de su traza en Phoenix.
    el sintetizador. Cada llamada al LLM muestra prompt, respuesta, tokens y
    costo; cada herramienta, su entrada y su salida.
 
-<!--PENDIENTE-CAPTURAS: reemplazar este bloque con la tabla de capturas reales cuando se corran las pruebas-->
+### Capturas de las trazas (en `screenshots/`)
+
+Todas salen de una corrida real del sistema (LLM Anthropic, Pinecone y Redis de
+verdad). En cada una se ve la traza con su raiz `job.ejecutar` / `job.reanudar`
+en estado **OK**, el `job_id` como `session.id`, el arbol de spans (supervisor →
+investigador → analista → validacion → sintetizador) y el costo.
+
+| Captura | Que muestra |
+|---|---|
+| [`01-prueba1-consulta-politica.png`](screenshots/01-prueba1-consulta-politica.png) | Prueba 1: arbol de spans de la consulta solo con RAG; el supervisor cierra sin llamar al analista |
+| [`02-prueba2-pedido-mayorista.png`](screenshots/02-prueba2-pedido-mayorista.png) | Prueba 2: arbol completo con los tres calculos encadenados y la validacion por recalculo |
+| [`02b-prueba2-llamada-llm-tokens-costo.png`](screenshots/02b-prueba2-llamada-llm-tokens-costo.png) | Prueba 2: detalle de una llamada al LLM con prompt, respuesta, tokens y costo |
+| [`03-prueba3-pregunta-compuesta.png`](screenshots/03-prueba3-pregunta-compuesta.png) | Prueba 3: un dato de politica + un calculo (vacaciones) |
+| [`04a-prueba4-aprobacion-pausa.png`](screenshots/04a-prueba4-aprobacion-pausa.png) | Prueba 4: la traza `job.ejecutar` termina en la pausa (`interrupt`), sin haber enviado nada |
+| [`04b-prueba4-aprobacion-reanudacion.png`](screenshots/04b-prueba4-aprobacion-reanudacion.png) | Prueba 4: la traza `job.reanudar` tras la aprobacion humana, con el despacho |
+| [`05-prueba5-fuera-de-dominio.png`](screenshots/05-prueba5-fuera-de-dominio.png) | Prueba 5: pregunta sin respaldo en las politicas; el sistema lo reconoce y no cita fuentes |
+| [`06a-persistencia-pausa-antes-del-reinicio.png`](screenshots/06a-persistencia-pausa-antes-del-reinicio.png) | Persistencia: tarea pausada en `WAITING_APPROVAL` antes de reiniciar |
+| [`06b-persistencia-reanudacion-tras-reinicio.png`](screenshots/06b-persistencia-reanudacion-tras-reinicio.png) | Persistencia: la misma tarea reanudada tras `docker compose restart redis api worker` |
+| [`07-sesiones-una-por-trabajo.png`](screenshots/07-sesiones-una-por-trabajo.png) | Vista de sesiones: una sesion por `job_id` |
+| [`08-metricas-costo-y-tokens.png`](screenshots/08-metricas-costo-y-tokens.png) | Metricas del proyecto en Phoenix: volumen de trazas (todas en OK), percentiles de latencia, costo y tokens por modelo. Incluye tambien las corridas de verificacion previas (22 trazas), por eso el total acumulado (~US$ 0,85) es mayor que el de las 5 pruebas |
+
+**Costo y latencia por prueba** (lo que muestra Phoenix en cada captura, modelo
+`claude-haiku-4-5`):
+
+| Prueba | Latencia de la traza | Costo de la traza |
+|---|---|---|
+| 1. Consulta de politica (solo RAG) | 17,8 s | US$ 0,02 |
+| 2. Pedido mayorista | 29,9 s | US$ 0,07 |
+| 3. Pregunta compuesta | 20,3 s | US$ 0,05 |
+| 4a. Tarea critica: hasta la pausa (`job.ejecutar`) | 28,3 s | US$ 0,07 |
+| 4b. Tarea critica: tras la aprobacion (`job.reanudar`) | 38 ms | US$ 0 (no llama al LLM: solo `aprobacion` y `despacho`) |
+| 5. Pregunta fuera de las politicas | 14,1 s | US$ 0,03 |
+
+Las cinco pruebas juntas cuestan alrededor de US$ 0,24. Con solo cinco muestras
+la mediana de latencia es ~20 s y el p95 coincide con el maximo (~30 s); la
+captura 08 muestra los percentiles que calcula Phoenix.
+
+Los `job_id` de la corrida documentada (se pueden buscar como `session.id`):
+prueba 1 `6eaf910b-…`, prueba 2 `0777268e-…`, prueba 3 `7482f73a-…`, prueba 4
+`3770a32d-…`, prueba 5 `7841b6a0-…`. El LLM no es determinista: en otra
+corrida los textos cambian, los `job_id` son otros y los criterios de exito se
+mantienen.
+
+### Ejemplo de salida esperada
+
+Resumen real de `docker compose exec api python -m scripts.pruebas_sistema`
+(las respuestas largas se muestran truncadas por el propio script):
+
+```text
+[1. Consulta de política (solo RAG)]
+      respuesta: Un cliente tiene 10 días corridos desde que recibe el producto ... (politica_devoluciones.pdf).
+      Fuentes: politica_devoluciones
+      OK en 19.0 s · job_id (session.id en Phoenix): 6eaf910b-29da-42a7-824e-d2e72e4db24d
+
+[2. Pedido mayorista (RAG + cálculos encadenados)]
+      respuesta: ... Descuento total acumulado: 13% ... Subtotal $72.000 - Ahorro $9.360 = Total de productos $62.640 ...
+      OK en 30.1 s · job_id (session.id en Phoenix): 0777268e-4176-41c9-9910-ad226f516675
+
+[3. Pregunta compuesta (política + cálculo)]
+      respuesta: Con 7 años de antigüedad ... te corresponden 21 días corridos de vacaciones anuales ... mínimo de 15 días de anticipación ...
+      OK en 21.1 s · job_id (session.id en Phoenix): 7482f73a-46d9-4b33-a403-393ccd59732c
+
+[4. Tarea crítica con aprobación humana]
+      pausado. Se le pide aprobar a un humano: el sistema va a enviar el informe a 'gerencia@empresa.com' (efecto secundario irreversible)
+      OK en 30.4 s · job_id (session.id en Phoenix): 3770a32d-8b3b-45ae-acbc-d9fb2932da9a
+
+[5. Pregunta fuera de las políticas]
+      respuesta: No hay información disponible en los datos validados sobre la política de teletrabajo ...
+      OK en 15.2 s · job_id (session.id en Phoenix): 7841b6a0-f445-4d9c-9bb1-de2fe7e7b4a1
+
+RESUMEN
+  OK    1. Consulta de política (solo RAG)
+  OK    2. Pedido mayorista (RAG + cálculos encadenados)
+  OK    3. Pregunta compuesta (política + cálculo)
+  OK    4. Tarea crítica con aprobación humana
+  OK    5. Pregunta fuera de las políticas
+
+5 de 5 escenarios OK. Las trazas están en Phoenix (http://localhost:6006): buscá cada job_id en session.id.
+```
+
+El chequeo de salud responde `{"status":"ok","redis":true,"pendientes_en_cola":0}`
+y el contenedor `ingesta` termina solo (`Exited`) despues de cargar los 13
+fragmentos de los 4 PDF en Pinecone.
 
 ## Persistencia y reinicios
 
@@ -350,6 +432,11 @@ docker compose restart redis api worker
 # 3. Aprobar despues del reinicio: la tarea continua desde el checkpoint
 curl -X POST http://localhost:8000/tasks/<job_id>/approve -H "Content-Type: application/json" -d '{"aprobado": true}'
 ```
+
+**Evidencia**: [`06a`](screenshots/06a-persistencia-pausa-antes-del-reinicio.png)
+y [`06b`](screenshots/06b-persistencia-reanudacion-tras-reinicio.png) muestran
+la misma tarea antes y despues del reinicio: pasa de `WAITING_APPROVAL` a `DONE`
+al aprobar, sin repetir el trabajo ya hecho y citando `politica_devoluciones.pdf`.
 
 Redis arranca con AOF (`--appendonly yes`) y un volumen, asi que los
 checkpoints tambien sobreviven a un reinicio de Redis (sin AOF, Redis solo
@@ -374,11 +461,15 @@ python -m ruff check app tests scripts --select F,E9,B
 python -m mypy --strict app tests scripts
 ```
 
-Resultado esperado: `177 passed`, `All checks passed!` y `Success: no issues
-found in 48 source files`. Son 137 funciones `test_*`; algunas estan
+Resultado esperado: `186 passed`, `All checks passed!` y `Success: no issues
+found in 50 source files`. Son 146 funciones `test_*`; algunas estan
 parametrizadas y generan mas casos. No necesitan API key, Docker ni Redis (LLM
 falsos y `fakeredis`), asi que corren igual en un `git clone` en limpio con
 Python 3.12 o superior.
+
+Los mismos tres comandos corren en GitHub Actions (`.github/workflows/tests.yml`,
+con Python 3.12) en cada push, para que cualquier cambio futuro mantenga los
+tests, el lint y el tipado en verde.
 
 Que es real y que es falso en los tests: **el grafo, los agentes, las
 herramientas, la validacion, los guardarrailes, el RAG (BM25, RRF, filtros) y la
@@ -397,7 +488,8 @@ del indice, el chequeo de dimension, los reintentos ante `503` (y que un `401`
 | `test_corpus.py`, `test_recuperador.py` | Troceado determinista con metadata, BM25 + RRF, filtro por categoria, degradacion a BM25, golden set (hit@3) |
 | `test_pinecone.py` | La integracion con el SDK real contra un servidor HTTP falso |
 | `test_dominio.py` | El arbitro (procedencia, alteracion, recalculo, coherencia), herramientas con Pydantic, guardarrailes del supervisor, traduccion de errores |
-| `test_cadenas.py` | La cadena LCEL: salida estructurada, reintentos con log, credenciales, respuesta de respaldo |
+| `test_cadenas.py` | La cadena LCEL: salida estructurada, reintentos con log, credenciales, respuesta de respaldo e importes inventados |
+| `test_montos.py` | El verificador de importes: formatos de pesos, tolerancia de centavos, importes respaldados y no respaldados |
 | `test_orquestador.py` | El grafo completo: camino feliz, consulta sin analista, refinamientos, degradaciones, topes, configuracion y diagrama |
 | `test_api.py`, `test_worker.py`, `test_jobs.py`, `test_hitl.py` | Contratos HTTP y documentacion OpenAPI, que `POST` no bloquea, estados, `FAILED`, concurrencia, aprobacion humana |
 | `test_observabilidad.py` | Spans de las herramientas (falla de infraestructura = ERROR, sin resultados = OK) y span raiz con `session.id = job_id` |
@@ -417,6 +509,7 @@ del indice, el chequeo de dimension, los reintentos ante `503` (y que un `401`
 │   ├── hitl.py               # criticidad, nodo de aprobacion (interrupt) y POST /tasks/{id}/approve
 │   ├── calculos.py           # reglas de negocio como funciones puras con contratos Pydantic
 │   ├── cadenas.py            # cadena LCEL del sintetizador (salida estructurada + reintentos)
+│   ├── montos.py             # verificador: la respuesta solo cita importes que salen de los datos validados
 │   ├── llm.py                # fabrica del LLM (OpenAI o Anthropic) y traduccion de errores
 │   ├── config.py             # variables de entorno validadas (Settings)
 │   ├── state.py, traza.py    # estado compartido y utilidades de traza
@@ -428,11 +521,13 @@ del indice, el chequeo de dimension, los reintentos ante `503` (y que un `401`
 ├── scripts/
 │   ├── pruebas_sistema.py    # las 5 pruebas del sistema contra la API real
 │   └── generar_diagrama.py   # regenera el diagrama Mermaid
-├── tests/                    # 177 casos con LLM falsos, Redis falso y un servidor HTTP falso de Pinecone
+├── .github/workflows/        # tests.yml: pytest + ruff + mypy en cada push (GitHub Actions)
+├── tests/                    # 186 casos con LLM falsos, Redis falso y un servidor HTTP falso de Pinecone
 ├── screenshots/              # capturas de Phoenix de las 5 pruebas
 ├── Dockerfile                # imagen de la API, el worker y la ingesta
 ├── docker-compose.yml        # redis-stack + phoenix + ingesta + api + worker
 ├── run.sh                    # ./run.sh levanta todo; ./run.sh pruebas corre las 5 pruebas
+├── pyproject.toml            # declara Python >= 3.12 y apunta a requirements.txt
 ├── requirements.txt          # dependencias con versiones fijadas (incluye las de testing)
 ├── requirements-dev.txt      # suma ruff y mypy
 └── .env.example              # plantilla de variables de entorno (sin keys reales)
@@ -479,6 +574,13 @@ del indice, el chequeo de dimension, los reintentos ante `503` (y que un `401`
   analizar sin investigacion valida o cerrar con un analisis rechazado que se
   puede corregir; y hay un tope de pasos (`MAX_PASOS_SUPERVISOR`). Si el LLM
   falla, decide una regla por defecto: el sistema no se cae.
+- **La respuesta tampoco puede inventar importes**: `app/montos.py` extrae cada
+  monto en pesos (`$1.200`, `$9.360`) del texto del sintetizador y exige que
+  exista en los datos ya validados (entradas y salidas de los calculos, o
+  numeros de los fragmentos recuperados). Si aparece uno que no esta (por
+  ejemplo, cuanto vale cada descuento por separado), la respuesta se rechaza y
+  se reintenta indicandole al LLM cuales sobran; tras 3 intentos fallidos se
+  devuelve la respuesta de respaldo. Salio de una falla real vista en la prueba 2.
 - **Cada especialista ve solo lo que necesita**: recibe una instruccion
   autocontenida, no la conversacion (evita contaminacion de contexto) y tiene
   herramientas acotadas (minimo privilegio).
@@ -533,7 +635,8 @@ codigo, en `calculos.py`, y cubiertos por tests):
   ordenado si esta cubierto. Una cola con acuse de recibo (Redis Streams, Arq o
   Celery) lo resolveria.
 - El envio del informe es una simulacion (lista `outbox` en Redis).
-- La imagen de Phoenix se usa con la etiqueta `latest`; para un despliegue real
-  conviene fijar una version.
+- Las imagenes de Redis Stack y de Phoenix (20.21.0, la de las capturas) estan
+  fijadas por digest en `docker-compose.yml`: el resultado no cambia aunque salgan
+  versiones nuevas. Para actualizar Phoenix hay que cambiar el digest a proposito.
 - El corpus es chico (4 PDF, 13 fragmentos): sirve para demostrar la arquitectura,
   no para medir la calidad de recuperacion a escala.

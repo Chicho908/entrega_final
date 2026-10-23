@@ -1,0 +1,16 @@
+# Metadatos del proyecto: declara la version de Python y apunta a requirements.txt como unica fuente de dependencias
+[project]
+name = "intelligence-system"
+version = "1.0.0"
+description = "Sistema Intelligence de grado de produccion: RAG + agentes con supervisor + API asincrona + observabilidad (Modulo 8, CoderHouse)"
+readme = "README.md"
+# Python 3.12 o superior: es la misma version del Dockerfile (python:3.12-slim) y del archivo .python-version
+requires-python = ">=3.12"
+# Las dependencias no se repiten aca: se leen de requirements.txt (versiones fijadas)
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools]
+packages = ["app", "app.agents", "app.rag"]

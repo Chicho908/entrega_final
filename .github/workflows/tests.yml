@@ -1,0 +1,24 @@
+# Verificacion automatica en cada push: tests, lint y tipado con Python 3.12
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  calidad:
+    runs-on: ubuntu-latest
+    steps:
+      # Baja el codigo del repositorio
+      - uses: actions/checkout@v4
+      # Python 3.12, la misma version del Dockerfile y de pyproject.toml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      # Mismas dependencias que usa quien clona el repo
+      - run: pip install -r requirements-dev.txt
+      # Los tests no necesitan API keys: usan LLM, Redis y Pinecone falsos
+      - run: python -m pytest -q
+      - run: python -m ruff check app tests scripts --select F,E9,B
+      - run: python -m mypy --strict app tests scripts

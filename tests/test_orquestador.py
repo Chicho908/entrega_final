@@ -358,6 +358,25 @@ def test_configuracion(monkeypatch: pytest.MonkeyPatch) -> None:
         config.cargar_configuracion()
 
 
+# Test 17b: el nombre del proyecto de Phoenix no está escrito en el código: con endpoint activo es obligatorio y sin endpoint no hace falta
+def test_configuracion_nombre_de_proyecto_de_phoenix(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(config, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-prueba")
+    for variable, valor in VARIABLES_OBLIGATORIAS.items():
+        monkeypatch.setenv(variable, valor)
+    monkeypatch.delenv("PHOENIX_PROJECT_NAME", raising=False)
+    # Sin endpoint la observabilidad está apagada y el nombre queda vacío (no hay ningún valor por defecto en el código)
+    monkeypatch.delenv("PHOENIX_COLLECTOR_ENDPOINT", raising=False)
+    assert config.cargar_configuracion().phoenix_proyecto == ""
+    # Con endpoint pero sin nombre de proyecto corta al arrancar, nombrando la variable que falta
+    monkeypatch.setenv("PHOENIX_COLLECTOR_ENDPOINT", "http://phoenix:6006/v1/traces")
+    with pytest.raises(config.ConfigError, match="PHOENIX_PROJECT_NAME"):
+        config.cargar_configuracion()
+    # Con el nombre definido usa exactamente el que viene del entorno
+    monkeypatch.setenv("PHOENIX_PROJECT_NAME", "proyecto-de-prueba")
+    assert config.cargar_configuracion().phoenix_proyecto == "proyecto-de-prueba"
+
+
 # Test 18: el diagrama Mermaid del grafo contiene los nodos y las aristas condicionales del supervisor
 def test_diagrama_mermaid() -> None:
     app, _ = armar_orquestador([], [], [], [])

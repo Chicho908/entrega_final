@@ -76,8 +76,8 @@ class Settings:
     job_ttl_s: int = 86400
     # Endpoint de Phoenix al que se envían las trazas ("" = observabilidad desactivada)
     phoenix_endpoint: str = ""
-    # Nombre del proyecto en Phoenix
-    phoenix_proyecto: str = "intelligence-system"
+    # Nombre del proyecto en Phoenix (sin valor por defecto en el código: sale de PHOENIX_PROJECT_NAME y es obligatorio si hay endpoint)
+    phoenix_proyecto: str = ""
 
 
 # Lee una variable de entorno entera y valida que no sea menor al mínimo permitido
@@ -147,6 +147,14 @@ def cargar_configuracion() -> Settings:
         raise ConfigError(f"CHUNK_OVERLAP ({chunk_overlap}) debe ser menor que CHUNK_SIZE ({chunk_size}).")
 
     # Arma y devuelve la configuración completa
+    # Lee el endpoint de Phoenix; vacío significa observabilidad desactivada
+    phoenix_endpoint = os.getenv("PHOENIX_COLLECTOR_ENDPOINT", "").strip()
+    # Con observabilidad activa el nombre del proyecto es obligatorio: no se escribe ningún nombre en el código
+    phoenix_proyecto = os.getenv("PHOENIX_PROJECT_NAME", "").strip()
+    # Si hay endpoint pero falta el nombre del proyecto, corta con un mensaje claro
+    if phoenix_endpoint and not phoenix_proyecto:
+        raise ConfigError("Falta PHOENIX_PROJECT_NAME (obligatorio cuando PHOENIX_COLLECTOR_ENDPOINT está definido). Copiá .env.example a .env y completalo.")
+
     return Settings(
         proveedor=proveedor,
         api_key=api_key,
@@ -172,6 +180,6 @@ def cargar_configuracion() -> Settings:
         worker_concurrencia=_leer_entero("WORKER_CONCURRENCIA", por_defecto=5, minimo=1),
         job_timeout_s=_leer_entero("JOB_TIMEOUT_SEGUNDOS", por_defecto=300, minimo=5),
         job_ttl_s=_leer_entero("JOB_TTL_SEGUNDOS", por_defecto=86400, minimo=60),
-        phoenix_endpoint=os.getenv("PHOENIX_COLLECTOR_ENDPOINT", "").strip(),
-        phoenix_proyecto=os.getenv("PHOENIX_PROJECT_NAME", "").strip() or "intelligence-system",
+        phoenix_endpoint=phoenix_endpoint,
+        phoenix_proyecto=phoenix_proyecto,
     )

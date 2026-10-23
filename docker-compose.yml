@@ -6,7 +6,7 @@
 services:
   # Redis Stack = Redis + modulos RediSearch y RedisJSON, que necesita el checkpointer de LangGraph
   redis:
-    image: redis/redis-stack-server:7.4.0-v3
+    image: redis/redis-stack-server:7.4.0-v3@sha256:7d8e657d60d525534d6abe96e7645ab30ef1b4f1ffedc6eeb2d4d4283b3a49b9
     ports:
       - "6379:6379"
     # Persistencia: AOF (cada escritura se registra en disco) + volumen, para que los trabajos pausados y los checkpoints sobrevivan a un reinicio
@@ -22,7 +22,8 @@ services:
 
   # Dashboard de observabilidad: recibe las trazas por OTLP y calcula costo y latencia
   phoenix:
-    image: arizephoenix/phoenix:latest
+    # Version fijada por digest (Phoenix 20.21.0, la que se uso para las capturas): con `latest` una version nueva podria cambiar la interfaz o romper la ingesta de trazas
+    image: arizephoenix/phoenix@sha256:005ce63e73f70e014b78733ac72dbbc2b59aa5123e435e297337079a5a714320
     ports:
       - "6006:6006"   # interfaz web y endpoint HTTP de trazas
       - "4317:4317"   # endpoint gRPC de trazas
